@@ -738,6 +738,18 @@ def _convert_compile_commands(aquery_output):
                 'directory': os.environ["BUILD_WORKSPACE_DIRECTORY"],
             }
 
+def _get_output_user_root():
+    """Get the output_user_root if it was explicitly set, else returns None."""
+    # Dazel runs the bazel command with sudo, thus we can use SUDO_COMMAND to peak at the used
+    # arguments.
+    if not 'SUDO_COMMAND' in os.environ:
+        return None
+
+    bazel_command = os.environ['SUDO_COMMAND']
+    resulting_match = re.search("'--output_user_root=(.*?)' ", bazel_command)
+    if not resulting_match:
+        return None
+    return match.group(1)
 
 def _get_commands(target: str, flags: str):
     """Yields compile_commands.json entries for a given target and flags, gracefully tolerating errors."""
@@ -783,13 +795,19 @@ def _get_commands(target: str, flags: str):
         '--features=-compiler_param_file',
     ] + additional_flags
 
+    # If the output_user_root was set explicitly we want to forward this argument to the bazel
+    # aquery command. This argument needs to be set directly after bazel which is why we insert at
+    # idx 1.
+    output_user_root = _get_output_user_root()
+    if output_user_root:
+        aquery_args.insert(1, f'--output_user_root={output_user_root}')
+
     aquery_process = subprocess.run(
         aquery_args,
         capture_output=True,
         encoding=locale.getpreferredencoding(),
         check=False, # We explicitly ignore errors from `bazel aquery` and carry on.
     )
-
 
     # Filter aquery error messages to just those the user should care about.
     for line in aquery_process.stderr.splitlines():
